@@ -39,14 +39,14 @@ export default function App() {
       <Routes>
         <Route path="/" element={
           !perfil ? <Login /> :
-          perfil.rol === 'operador' ? <Navigate to="/operador" /> :
+          (perfil.rol === 'operador' || perfil.rol === 'view') ? <Navigate to="/operador" /> :
           <Navigate to="/proveedor" />
         } />
         <Route path="/proveedor" element={
           perfil?.rol === 'proveedor' ? <ClienteDashboard perfil={perfil} /> : <Navigate to="/" />
         } />
         <Route path="/operador" element={
-          perfil?.rol === 'operador' ? <TurneroDashboard perfil={perfil} /> : <Navigate to="/" />
+          (perfil?.rol === 'operador' || perfil?.rol === 'view') ? <TurneroDashboard perfil={perfil} /> : <Navigate to="/" />
         } />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
