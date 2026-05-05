@@ -1,4 +1,4 @@
-export type Role = 'proveedor' | 'operador'
+export type Role = 'proveedor' | 'operador' | 'view'
 export type Categoria = 'frio' | 'seco'
 
 export interface Perfil {
