@@ -15,8 +15,9 @@ export interface Turno {
   proveedor_id: string
   proveedor_nombre: string
   proveedor_empresa: string
-  descripcion: string | null
+  tipo_recepcion: 'STOCK' | 'CROSSDOCKING'
   bultos: number | null
+  tiempo_descarga: number
   observaciones: string | null
   estado: 'confirmado' | 'pendiente' | 'cancelado'
 }
