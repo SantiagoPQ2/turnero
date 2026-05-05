@@ -1,9 +1,10 @@
-export type Role = 'cliente' | 'turnero'
+export type Role = 'proveedor' | 'operador'
 
-export interface Session {
-  role: Role
+export interface Perfil {
+  id: string
   nombre: string
-  empresa: string
+  empresa: string | null
+  rol: Role
 }
 
 export interface Turno {
@@ -11,6 +12,7 @@ export interface Turno {
   created_at: string
   fecha: string
   hora: string
+  proveedor_id: string
   proveedor_nombre: string
   proveedor_empresa: string
   descripcion: string | null
