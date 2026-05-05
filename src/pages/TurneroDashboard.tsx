@@ -39,6 +39,7 @@ export default function TurneroDashboard({ perfil }: Props) {
 
   const logout = () => supabase.auth.signOut()
 
+  // Build calendar grid
   const monthStart = startOfMonth(currentMonth)
   const monthEnd = endOfMonth(currentMonth)
   const calDays: Date[] = []
@@ -75,12 +76,12 @@ export default function TurneroDashboard({ perfil }: Props) {
           <div style={s.logoRow}><span style={s.logoText}>📋 Turnero</span><span style={s.opBadge}>Operador</span></div>
           <div style={s.statsGrid}>
             <div style={s.statCard}><div style={s.statNum}>{stats.total}</div><div style={s.statLabel}>Este mes</div></div>
-            <div style={{...s.statCard, background: 'var(--green-light)', borderColor: 'rgba(34,197,94,0.2)' }}><div style={{ ...s.statNum, color: 'var(--green)' }}>{stats.confirmados}</div><div style={s.statLabel}>Confirmados</div></div>
+            <div style={{ ...s.statCard, background: 'var(--green-light)', borderColor: 'rgba(34,197,94,0.2)' }}><div style={{ ...s.statNum, color: 'var(--green)' }}>{stats.confirmados}</div><div style={s.statLabel}>Confirmados</div></div>
             <div style={{ ...s.statCard, background: 'var(--yellow-light)', borderColor: 'rgba(245,158,11,0.2)' }}><div style={{ ...s.statNum, color: 'var(--yellow)' }}>{stats.pendientes}</div><div style={s.statLabel}>Pendientes</div></div>
             <div style={{ ...s.statCard, background: 'var(--red-light)', borderColor: 'rgba(239,68,68,0.2)' }}><div style={{ ...s.statNum, color: 'var(--red)' }}>{stats.cancelados}</div><div style={s.statLabel}>Cancelados</div></div>
           </div>
           <div style={s.secLabel}>Filtrar</div>
-          {('odos','confirmado','pendiente','cancelado'] as EstadoFilter[]).map(e => (
+          {(['todos', 'confirmado', 'pendiente', 'cancelado'] as EstadoFilter[]).map(e => (
             <button key={e} style={{ ...s.fBtn, ...(filter === e ? s.fBtnA : {}) }} onClick={() => setFilter(e)}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: dotC[e], flexShrink: 0, display: 'inline-block' }} />
               {e.charAt(0).toUpperCase() + e.slice(1)}
@@ -89,6 +90,7 @@ export default function TurneroDashboard({ perfil }: Props) {
         </div>
         <button onClick={logout} style={s.logoutBtn}>Cerrar sesión</button>
       </aside>
+
       <main style={s.main}>
         <div style={s.calHead}>
           <button style={s.navBtn} onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>‹</button>
@@ -96,7 +98,7 @@ export default function TurneroDashboard({ perfil }: Props) {
           <button style={s.navBtn} onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>›</button>
           <button style={s.todayBtn} onClick={() => { setCurrentMonth(new Date()); setSelectedDay(new Date()) }}>Hoy</button>
         </div>
-        <div style={s.dHeads}>{['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => <div key={d} style={s.dHead}>{d}</div>)}</div>
+        <div style={s.dHeads}>{['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d => <div key={d} style={s.dHead}>{d}</div>)}</div>
         <div style={s.calGrid}>
           {calDays.map((day, i) => {
             const dt = turnosDelDia(day)
@@ -109,16 +111,17 @@ export default function TurneroDashboard({ perfil }: Props) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                   {dt.slice(0, 3).map(t => (
                     <div key={t.id} style={{ ...s.cEvent, ...evStyle(t.estado) }} onClick={e => { e.stopPropagation(); setSelectedTurno(t); setSelectedDay(day) }}>
-                      {t.hora} {t.hora_fin? `(→ ${t.hora_fin})`:''} &#x77; &#x73;{t.proveedor_empresa}
+                      {t.hora} · {t.proveedor_empresa}
                     </div>
                   ))}
-                  {dt.length > 3 && <div style={{ fontSize: '10px', color: 'var(--text3)', padding: '1px 5px' }}> +{dt.length - 3} más</div>}
+                  {dt.length > 3 && <div style={{ fontSize: '10px', color: 'var(--text3)', padding: '1px 5px' }}>+{dt.length - 3} más</div>}
                 </div>
               </div>
             )
           })}
         </div>
       </main>
+
       <aside style={s.detailPanel}>
         <div style={s.detailHead}>
           <div style={s.detailDate}>{format(selectedDay, "EEEE d 'de' MMMM", { locale: es })}</div>
@@ -127,23 +130,21 @@ export default function TurneroDashboard({ perfil }: Props) {
         {loading && <div style={{ padding: '20px', color: 'var(--text2)', fontSize: '13px', textAlign: 'center' }}>Cargando...</div>}
         {!loading && turnosSel.length === 0 && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '32px' }}>
-            <div style={{ fontSize: '32px', marginBottom: '8px' }}>📭 </div>
+            <div style={{ fontSize: '32px', marginBottom: '8px' }}>📭</div>
             <div style={{ color: 'var(--text3)', fontSize: '13px' }}>Sin turnos para este día</div>
           </div>
         )}
         {turnosSel.map(t => (
           <div key={t.id} style={{ ...s.tCard, ...(selectedTurno?.id === t.id ? s.tCardA : {}) }} onClick={() => setSelectedTurno(selectedTurno?.id === t.id ? null : t)}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ fontFamily: 'var(--mono)', fontWeight: '600', fontSize: '15px' }}>{t.hora}{t.hora_fin ? ` → ${t.hora_fin}` : ''}</span>
+              <span style={{ fontFamily: 'var(--mono)', fontWeight: '600', fontSize: '15px' }}>{t.hora}</span>
               <span style={{ ...s.badge, ...badgeStyle(t.estado) }}>{t.estado}</span>
             </div>
             <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '2px' }}>{t.proveedor_empresa}</div>
             <div style={{ color: 'var(--text2)', fontSize: '12px' }}>{t.proveedor_nombre}</div>
             {selectedTurno?.id === t.id && (
               <div style={s.tDetail} className="animate-in">
-                <div style={s.dRow}><span>�$Tipo</span><strong>{t.tipo_recepcion}</strong></div>
-                {t.bultos && <div style={s.dRow}><span>📬 Pallets</span><strong>{t.bultos}</strong></div>}
-                {t.tiempo_descarga && <div style={s.dRow}><span>⑳ Descarga</span><strong>{t.tiempo_descarga} min → {t.hora_fin}</strong></div>}
+                {t.bultos && <div style={s.dRow}><span>📬 Bultos</span><strong>{t.bultos}</strong></div>}
                 {t.observaciones && <div style={s.dRow}><span>💬 Obs.</span><strong>{t.observaciones}</strong></div>}
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '8px' }}>
                   {t.estado !== 'confirmado' && <button style={s.btnC} onClick={e => { e.stopPropagation(); handleEstado(t.id, 'confirmado') }}>✓ Confirmar</button>}
