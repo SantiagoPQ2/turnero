@@ -12,6 +12,7 @@ export interface Turno {
   created_at: string
   fecha: string
   hora: string
+  hora_fin: string
   proveedor_id: string
   proveedor_nombre: string
   proveedor_empresa: string
