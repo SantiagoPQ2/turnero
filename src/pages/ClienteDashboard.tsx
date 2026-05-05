@@ -1,23 +1,15 @@
 import { useState, useEffect, CSSProperties } from 'react'
 import { supabase } from '../lib/supabase'
-import { format, addDays, startOfDay, isToday, parseISO, addMinutes } from 'date-fns'
+import { format, addDays, startOfDay, isToday, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { Perfil, Turno } from '../types'
+import { Perfil, Turno, DiaBloqueado, SLOTS_FRIO, SLOTS_SECO } from '../types'
 
-const HORARIOS_BASE = [
-  '08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30',
-  '13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30'
-]
-
-const horaToMin = (h: string) => { const [hh, mm] = h.split(':').map(Number); return hh * 60 + mm }
-const minToHora = (m: number) => `${String(Math.floor(m / 60)).padStart(2,'0')}:${String(m % 60).padStart(2,'0')}`
-
-function generateDays(n = 14): Date[] {
+function generateDays(n = 21): Date[] {
   const today = startOfDay(new Date())
   const days: Date[] = []
   for (let i = 0; i < n; i++) {
     const d = addDays(today, i)
-    if (d.getDay() !== 0 && d.getDay() !== 6) days.push(d)
+    days.push(d)
   }
   return days
 }
@@ -26,7 +18,7 @@ type Step = 'calendario' | 'confirmar' | 'exito'
 interface FormData {
   tipo_recepcion: 'STOCK' | 'CROSSDOCKING'
   bultos: string
-  tiempo_descarga: string
+  telefono: string
   observaciones: string
 }
 interface Props { perfil: Perfil }
@@ -34,76 +26,76 @@ interface Props { perfil: Perfil }
 export default function ClienteDashboard({ perfil }: Props) {
   const [days] = useState<Date[]>(generateDays)
   const [selectedDay, setSelectedDay] = useState<Date | null>(null)
-  const [selectedHora, setSelectedHora] = useState<string | null>(null)
+  const [selectedSlot, setSelectedSlot] = useState<typeof SLOTS_FRIO[0] | null>(null)
   const [turnos, setTurnos] = useState<Turno[]>([])
   const [misTurnos, setMisTurnos] = useState<Turno[]>([])
+  const [diasBloqueados, setDiasBloqueados] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState<Step>('calendario')
   const [form, setForm] = useState<FormData>({
     tipo_recepcion: 'STOCK',
     bultos: '',
-    tiempo_descarga: '30',
+    telefono: '',
     observaciones: ''
   })
 
-  useEffect(() => { fetchTurnos() }, [])
+  const categoria = perfil.categoria ?? 'frio'
+  const slots = categoria === 'frio' ? SLOTS_FRIO : SLOTS_SECO
+  const colorCateg = categoria === 'frio' ? 'var(--accent)' : '#f59e0b'
+  const labelCateg = categoria === 'frio' ? '❄️ Frío' : '☀️ Seco'
 
-  const fetchTurnos = async () => {
-    const { data } = await supabase.from('z_turnos').select('*')
-    if (data) setTurnos(data as Turno[])
+  useEffect(() => { fetchData() }, [])
+
+  const fetchData = async () => {
+    const { data: t } = await supabase.from('z_turnos').select('*').eq('categoria', categoria)
+    if (t) setTurnos(t as Turno[])
+
     const { data: mis } = await supabase.from('z_turnos').select('*')
       .eq('proveedor_id', perfil.id).order('fecha', { ascending: true })
     if (mis) setMisTurnos(mis as Turno[])
+
+    const { data: bloq } = await supabase.from('z_dias_bloqueados').select('fecha')
+    if (bloq) setDiasBloqueados(bloq.map((b: any) => b.fecha))
   }
 
-  // Verifica si un horario está bloqueado por algún turno existente en ese día
-  const isOcupado = (fecha: Date, hora: string): boolean => {
-    const fechaStr = format(fecha, 'yyyy-MM-dd')
-    const horaMin = horaToMin(hora)
-    return turnos.some(t => {
-      if (t.fecha !== fechaStr || t.estado === 'cancelado') return false
-      const inicio = horaToMin(t.hora)
-      const fin = inicio + (t.tiempo_descarga || 30)
-      // El slot está bloqueado si cae dentro del rango [inicio, fin)
-      return horaMin >= inicio && horaMin < fin
-    })
+  const isWeekend = (d: Date) => d.getDay() === 0 || d.getDay() === 6
+  const isBloqueado = (d: Date) => {
+    const f = format(d, 'yyyy-MM-dd')
+    return isWeekend(d) || diasBloqueados.includes(f)
   }
 
-  // Calcula la hora de fin estimada según el tiempo seleccionado
-  const getHoraFin = (hora: string, minutos: number): string => {
-    const [hh, mm] = hora.split(':').map(Number)
-    const date = new Date(2000, 0, 1, hh, mm)
-    const fin = addMinutes(date, minutos)
-    return minToHora(fin.getHours() * 60 + fin.getMinutes())
+  const isSlotOcupado = (fecha: Date, hora: string): boolean => {
+    const f = format(fecha, 'yyyy-MM-dd')
+    return turnos.some(t => t.fecha === f && t.hora === hora && t.estado !== 'cancelado')
   }
 
   const handleConfirmar = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedDay || !selectedHora) return
+    if (!selectedDay || !selectedSlot) return
     setLoading(true)
-    const tiempo = parseInt(form.tiempo_descarga) || 30
-    const horaFin = getHoraFin(selectedHora, tiempo)
     await supabase.from('z_turnos').insert({
       fecha: format(selectedDay, 'yyyy-MM-dd'),
-      hora: selectedHora,
-      hora_fin: horaFin,
+      hora: selectedSlot.hora,
+      hora_fin: selectedSlot.hora_fin,
       proveedor_id: perfil.id,
       proveedor_nombre: perfil.nombre,
       proveedor_empresa: perfil.empresa ?? '',
       tipo_recepcion: form.tipo_recepcion,
       bultos: parseInt(form.bultos) || null,
-      tiempo_descarga: tiempo,
+      tiempo_descarga: selectedSlot.duracion,
+      telefono: form.telefono,
       observaciones: form.observaciones,
       estado: 'confirmado',
+      categoria,
     })
     setLoading(false)
     setStep('exito')
-    fetchTurnos()
+    fetchData()
   }
 
   const handleCancelar = async (id: string) => {
     await supabase.from('z_turnos').update({ estado: 'cancelado' }).eq('id', id)
-    fetchTurnos()
+    fetchData()
   }
 
   const logout = () => supabase.auth.signOut()
@@ -114,16 +106,20 @@ export default function ClienteDashboard({ perfil }: Props) {
     pendiente: { background: 'var(--yellow-light)', color: 'var(--yellow)' },
   }[e] ?? {})
 
-  const tiempoActual = parseInt(form.tiempo_descarga) || 30
-
   return (
     <div style={s.wrapper}>
       <aside style={s.sidebar}>
         <div>
           <div style={s.logoRow}><span style={s.logoText}>📋 Turnero</span></div>
           <div style={s.userCard}>
-            <div style={s.avatar}>{perfil.nombre[0].toUpperCase()}</div>
-            <div><div style={s.userName}>{perfil.nombre}</div><div style={s.userEmp}>{perfil.empresa}</div></div>
+            <div style={{ ...s.avatar, background: colorCateg }}>{perfil.nombre[0].toUpperCase()}</div>
+            <div>
+              <div style={s.userName}>{perfil.nombre}</div>
+              <div style={s.userEmp}>{perfil.empresa}</div>
+              <div style={{ ...s.categBadge, background: categoria === 'frio' ? 'rgba(59,130,246,0.15)' : 'rgba(245,158,11,0.15)', color: colorCateg }}>
+                {labelCateg}
+              </div>
+            </div>
           </div>
         </div>
         <div style={s.misSection}>
@@ -136,10 +132,10 @@ export default function ClienteDashboard({ perfil }: Props) {
                   <div style={s.tFecha}>{format(parseISO(t.fecha), 'EEE d MMM', { locale: es })}</div>
                   <div style={s.tHoraRow}>
                     <span style={s.tHora}>{t.hora}</span>
-                    <span style={s.tHoraSep}>→</span>
-                    <span style={s.tHoraFin}>{t.hora_fin}</span>
+                    <span style={{ color: 'var(--text3)', fontSize: '11px' }}>→</span>
+                    <span style={{ ...s.tHora, color: colorCateg, fontSize: '13px' }}>{t.hora_fin}</span>
                   </div>
-                  <div style={s.tTipo}>{t.tipo_recepcion} · {t.tiempo_descarga}min{t.bultos ? ` · ${t.bultos} pallets` : ''}</div>
+                  <div style={s.tTipo}>{t.tipo_recepcion}{t.bultos ? ` · ${t.bultos} pallets` : ''}</div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                   <div style={{ ...s.badge, ...estStyle(t.estado) }}>{t.estado}</div>
@@ -154,77 +150,82 @@ export default function ClienteDashboard({ perfil }: Props) {
       <main style={s.main}>
         {step === 'calendario' && (
           <div className="animate-in">
-            <div style={s.pHead}><h1 style={s.pTitle}>Reservar turno</h1><p style={s.pSub}>Seleccioná un día y horario disponible para la entrega</p></div>
+            <div style={s.pHead}>
+              <h1 style={s.pTitle}>Reservar turno</h1>
+              <p style={s.pSub}>Turnos disponibles para categoría <strong style={{ color: colorCateg }}>{labelCateg}</strong></p>
+            </div>
+
+            {/* Days strip */}
             <div style={s.dayStrip}>
               {days.map(d => {
+                const bloq = isBloqueado(d)
                 const sel = selectedDay && format(d, 'yyyy-MM-dd') === format(selectedDay, 'yyyy-MM-dd')
-                const ok = HORARIOS_BASE.some(h => !isOcupado(d, h))
+                const hayDisp = !bloq && slots.some(sl => !isSlotOcupado(d, sl.hora))
                 return (
-                  <button key={d.toISOString()} style={{ ...s.dBtn, ...(sel ? s.dBtnA : {}), ...(!ok ? s.dBtnF : {}) }}
-                    onClick={() => { setSelectedDay(d); setSelectedHora(null) }} disabled={!ok}>
+                  <button key={d.toISOString()}
+                    style={{ ...s.dBtn, ...(sel ? s.dBtnA : {}), ...(bloq ? s.dBtnBlocked : !hayDisp ? s.dBtnFull : {}) }}
+                    onClick={() => { if (!bloq) { setSelectedDay(d); setSelectedSlot(null) } }}
+                    disabled={bloq}>
                     <span style={s.dName}>{format(d, 'EEE', { locale: es })}</span>
                     <span style={s.dNum}>{format(d, 'd')}</span>
                     <span style={s.dMon}>{format(d, 'MMM', { locale: es })}</span>
-                    {isToday(d) && <span style={s.tDot} />}
+                    {bloq && <span style={s.blockedX}>✕</span>}
+                    {isToday(d) && !bloq && <span style={s.tDot} />}
                   </button>
                 )
               })}
             </div>
 
-            {selectedDay && (
+            {selectedDay && !isBloqueado(selectedDay) && (
               <div className="animate-in">
                 <h2 style={{ ...s.pTitle, fontSize: '18px', textTransform: 'capitalize', marginBottom: '20px' }}>
                   {format(selectedDay, "EEEE d 'de' MMMM", { locale: es })}
                 </h2>
-                <div style={s.sGrid}>
-                  {(['🌅 Mañana', '☀️ Tarde'] as const).map((label, idx) => (
-                    <div key={label}>
-                      <div style={s.pLabel}>{label}</div>
-                      <div style={s.slots}>
-                        {HORARIOS_BASE.filter(h => idx === 0 ? parseInt(h) < 12 : parseInt(h) >= 12).map(hora => {
-                          const ocupado = isOcupado(selectedDay, hora)
-                          const isSelected = selectedHora === hora
-                          return (
-                            <button key={hora}
-                              style={{ ...s.slot, ...(ocupado ? s.slotO : isSelected ? s.slotSel : s.slotL) }}
-                              onClick={() => { if (!ocupado) setSelectedHora(hora) }}
-                              disabled={ocupado}>
-                              <span style={s.sHora}>{hora}</span>
-                              <span style={{ fontSize: '12px' }}>{ocupado ? 'Ocupado' : isSelected ? '✓ Seleccionado' : 'Disponible'}</span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                <div style={s.slotsCol}>
+                  {slots.map(slot => {
+                    const ocupado = isSlotOcupado(selectedDay, slot.hora)
+                    const isSel = selectedSlot?.hora === slot.hora
+                    return (
+                      <button key={slot.hora}
+                        style={{ ...s.slotCard, ...(ocupado ? s.slotOcupado : isSel ? s.slotSelected : s.slotLibre) }}
+                        onClick={() => { if (!ocupado) setSelectedSlot(slot) }}
+                        disabled={ocupado}>
+                        <div style={s.slotTime}>
+                          <span style={s.slotHora}>{slot.hora}</span>
+                          <span style={{ color: 'var(--text3)', fontSize: '14px' }}>→</span>
+                          <span style={s.slotHoraFin}>{slot.hora_fin}</span>
+                          <span style={s.slotDur}>{slot.duracion} min</span>
+                        </div>
+                        <div style={s.slotStatus}>{ocupado ? 'Ocupado' : isSel ? '✓ Seleccionado' : 'Disponible'}</div>
+                      </button>
+                    )
+                  })}
                 </div>
-                {selectedHora && (
+                {selectedSlot && (
                   <div style={{ marginTop: '24px' }}>
                     <button style={s.cBtn} onClick={() => setStep('confirmar')}>
-                      Continuar con {selectedHora} →
+                      Continuar con {selectedSlot.hora} → {selectedSlot.hora_fin} →
                     </button>
                   </div>
                 )}
               </div>
             )}
-            {!selectedDay && <div style={s.prompt}><div style={{ fontSize: '48px' }}>📅</div><div style={{ color: 'var(--text2)' }}>Seleccioná un día para ver los horarios</div></div>}
+            {!selectedDay && <div style={s.prompt}><div style={{ fontSize: '48px' }}>📅</div><div style={{ color: 'var(--text2)' }}>Seleccioná un día para ver los horarios disponibles</div></div>}
           </div>
         )}
 
-        {step === 'confirmar' && selectedDay && selectedHora && (
+        {step === 'confirmar' && selectedDay && selectedSlot && (
           <div className="animate-in" style={{ maxWidth: '560px' }}>
             <button onClick={() => setStep('calendario')} style={s.backBtn}>← Volver</button>
             <div style={s.cCard}>
               <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '20px' }}>Confirmá tu turno</h2>
               <div style={s.resumen}>
                 <div style={s.rRow}><span>📅 Fecha</span><strong style={{ textTransform: 'capitalize' }}>{format(selectedDay, "EEEE d 'de' MMMM", { locale: es })}</strong></div>
-                <div style={s.rRow}><span>🕐 Inicio</span><strong>{selectedHora}</strong></div>
-                <div style={s.rRow}><span>🕑 Fin estimado</span><strong style={{ color: 'var(--accent)' }}>{getHoraFin(selectedHora, tiempoActual)}</strong></div>
+                <div style={s.rRow}><span>🕐 Horario</span><strong style={{ color: colorCateg }}>{selectedSlot.hora} → {selectedSlot.hora_fin} ({selectedSlot.duracion} min)</strong></div>
                 <div style={s.rRow}><span>🏢 Empresa</span><strong>{perfil.empresa}</strong></div>
+                <div style={s.rRow}><span>Categoría</span><strong style={{ color: colorCateg }}>{labelCateg}</strong></div>
               </div>
-
               <form onSubmit={handleConfirmar} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {/* Tipo de recepción */}
                 <div style={s.field}>
                   <label style={s.label}>Tipo de recepción</label>
                   <div style={s.toggleRow}>
@@ -237,36 +238,23 @@ export default function ClienteDashboard({ perfil }: Props) {
                     ))}
                   </div>
                 </div>
-
-                {/* Cantidad de pallets */}
                 <div style={s.field}>
                   <label style={s.label}>Cantidad de pallets</label>
                   <input style={s.input} type="number" min="0" placeholder="Ej: 10"
                     value={form.bultos} onChange={e => setForm(f => ({ ...f, bultos: e.target.value }))} />
                 </div>
-
-                {/* Tiempo de descarga */}
                 <div style={s.field}>
-                  <label style={s.label}>Tiempo de descarga (minutos)</label>
-                  <input style={s.input} type="number" min="15" max="480" step="15" placeholder="Ej: 60" required
-                    value={form.tiempo_descarga} onChange={e => setForm(f => ({ ...f, tiempo_descarga: e.target.value }))} />
-                  {selectedHora && form.tiempo_descarga && (
-                    <div style={s.tiempoHint}>
-                      ⏱ Turno de <strong>{selectedHora}</strong> a <strong style={{ color: 'var(--accent)' }}>{getHoraFin(selectedHora, tiempoActual)}</strong>
-                      {' '}— el próximo turno disponible sería desde las <strong style={{ color: 'var(--green)' }}>{getHoraFin(selectedHora, tiempoActual)}</strong>
-                    </div>
-                  )}
+                  <label style={s.label}>Teléfono de contacto *</label>
+                  <input style={s.input} type="tel" placeholder="Ej: 1123456789" required
+                    value={form.telefono} onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))} />
                 </div>
-
-                {/* Observaciones */}
                 <div style={s.field}>
                   <label style={s.label}>Observaciones (opcional)</label>
                   <textarea style={{ ...s.input, minHeight: '70px', resize: 'vertical' }}
                     placeholder="Requiere montacargas, mercadería frágil, etc."
                     value={form.observaciones} onChange={e => setForm(f => ({ ...f, observaciones: e.target.value }))} />
                 </div>
-
-                <button type="submit" style={s.cBtn} disabled={loading}>
+                <button type="submit" style={{ ...s.cBtn, background: colorCateg }} disabled={loading}>
                   {loading ? 'Confirmando...' : '✓ Confirmar turno'}
                 </button>
               </form>
@@ -274,19 +262,18 @@ export default function ClienteDashboard({ perfil }: Props) {
           </div>
         )}
 
-        {step === 'exito' && selectedDay && selectedHora && (
+        {step === 'exito' && selectedDay && selectedSlot && (
           <div className="animate-in" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '80vh' }}>
             <div style={{ ...s.cCard, textAlign: 'center', maxWidth: '420px' }}>
-              <div style={{ fontSize: '56px', marginBottom: '16px' }}>✅</div>
+              <div style={{ fontSize: '56px', marginBottom: '16px' }}>{categoria === 'frio' ? '❄️' : '☀️'}</div>
               <h2 style={{ fontSize: '24px', fontWeight: '700', marginBottom: '12px' }}>¡Turno confirmado!</h2>
               <p style={{ color: 'var(--text2)', lineHeight: '1.6', marginBottom: '24px' }}>
                 <strong style={{ textTransform: 'capitalize' }}>{format(selectedDay, "EEEE d 'de' MMMM", { locale: es })}</strong><br />
-                🕐 <strong>{selectedHora}</strong> → <strong>{getHoraFin(selectedHora, tiempoActual)}</strong><br />
-                ⏱ {tiempoActual} minutos de descarga
+                🕐 <strong style={{ color: colorCateg }}>{selectedSlot.hora} → {selectedSlot.hora_fin}</strong>
               </p>
-              <button style={s.cBtn} onClick={() => {
-                setStep('calendario'); setSelectedDay(null); setSelectedHora(null)
-                setForm({ tipo_recepcion: 'STOCK', bultos: '', tiempo_descarga: '30', observaciones: '' })
+              <button style={{ ...s.cBtn, background: colorCateg }} onClick={() => {
+                setStep('calendario'); setSelectedDay(null); setSelectedSlot(null)
+                setForm({ tipo_recepcion: 'STOCK', bultos: '', telefono: '', observaciones: '' })
               }}>Reservar otro turno</button>
             </div>
           </div>
@@ -301,10 +288,11 @@ const s: Record<string, CSSProperties> = {
   sidebar: { width: '280px', background: 'var(--surface)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', padding: '24px', flexShrink: 0 },
   logoRow: { marginBottom: '20px' },
   logoText: { fontWeight: '700', fontSize: '18px' },
-  userCard: { display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--surface2)', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: '8px' },
-  avatar: { width: '36px', height: '36px', borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '15px', flexShrink: 0 },
+  userCard: { display: 'flex', alignItems: 'flex-start', gap: '12px', background: 'var(--surface2)', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', marginBottom: '8px' },
+  avatar: { width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '15px', flexShrink: 0 },
   userName: { fontWeight: '600', fontSize: '14px' },
-  userEmp: { color: 'var(--text2)', fontSize: '12px' },
+  userEmp: { color: 'var(--text2)', fontSize: '12px', marginBottom: '4px' },
+  categBadge: { display: 'inline-block', fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '20px' },
   misSection: { flex: 1, overflow: 'auto', marginTop: '20px' },
   secLabel: { color: 'var(--text2)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' },
   empty: { color: 'var(--text3)', fontSize: '13px', textAlign: 'center', padding: '20px 0' },
@@ -312,32 +300,34 @@ const s: Record<string, CSSProperties> = {
   tFecha: { color: 'var(--text2)', textTransform: 'capitalize', fontSize: '12px', marginBottom: '2px' },
   tHoraRow: { display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '2px' },
   tHora: { fontWeight: '700', fontFamily: 'var(--mono)', fontSize: '14px' },
-  tHoraSep: { color: 'var(--text3)', fontSize: '11px' },
-  tHoraFin: { fontWeight: '600', fontFamily: 'var(--mono)', fontSize: '13px', color: 'var(--accent)' },
   tTipo: { color: 'var(--text3)', fontSize: '11px' },
-  badge: { fontSize: '10px', padding: '2px 7px', borderRadius: '20px', fontWeight: '600', whiteSpace: 'nowrap' },
-  cancelBtn: { background: 'var(--red-light)', color: 'var(--red)', width: '20px', height: '20px', borderRadius: '50%', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: 'none', cursor: 'pointer' },
+  badge: { fontSize: '10px', padding: '2px 7px', borderRadius: '20px', fontWeight: '600', whiteSpace: 'nowrap' as const },
+  cancelBtn: { background: 'var(--red-light)', color: 'var(--red)', width: '20px', height: '20px', borderRadius: '50%', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', cursor: 'pointer' },
   logoutBtn: { marginTop: '16px', background: 'none', color: 'var(--text3)', fontSize: '13px', padding: '8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', width: '100%', cursor: 'pointer' },
   main: { flex: 1, padding: '40px', overflow: 'auto' },
   pHead: { marginBottom: '32px' },
   pTitle: { fontSize: '28px', fontWeight: '700', marginBottom: '6px' },
   pSub: { color: 'var(--text2)', fontSize: '15px' },
-  dayStrip: { display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '32px' },
-  dBtn: { flexShrink: 0, width: '72px', padding: '14px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', cursor: 'pointer', position: 'relative' },
+  dayStrip: { display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '32px' },
+  dBtn: { flexShrink: 0, width: '68px', padding: '12px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', cursor: 'pointer', position: 'relative' as const },
   dBtnA: { background: 'var(--accent-light)', borderColor: 'var(--accent)' },
-  dBtnF: { opacity: 0.4 },
-  dName: { fontSize: '11px', color: 'var(--text2)', textTransform: 'capitalize' },
-  dNum: { fontSize: '22px', fontWeight: '700', lineHeight: '1' },
-  dMon: { fontSize: '11px', color: 'var(--text2)', textTransform: 'capitalize' },
-  tDot: { position: 'absolute', bottom: '6px', width: '4px', height: '4px', borderRadius: '50%', background: 'var(--accent)' },
-  sGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' },
-  pLabel: { fontSize: '13px', fontWeight: '600', color: 'var(--text2)', marginBottom: '12px' },
-  slots: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  slot: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid', cursor: 'pointer' },
-  slotL: { background: 'var(--green-light)', borderColor: 'rgba(34,197,94,0.25)', color: 'var(--text)' },
-  slotSel: { background: 'var(--accent-light)', borderColor: 'var(--accent)', color: 'var(--text)' },
-  slotO: { background: 'var(--surface2)', borderColor: 'var(--border)', color: 'var(--text3)', cursor: 'not-allowed' },
-  sHora: { fontFamily: 'var(--mono)', fontWeight: '600', fontSize: '15px' },
+  dBtnFull: { opacity: 0.5 },
+  dBtnBlocked: { opacity: 0.35, cursor: 'not-allowed' as const, background: 'var(--surface2)' },
+  dName: { fontSize: '11px', color: 'var(--text2)', textTransform: 'capitalize' as const },
+  dNum: { fontSize: '20px', fontWeight: '700', lineHeight: '1' },
+  dMon: { fontSize: '10px', color: 'var(--text2)', textTransform: 'capitalize' as const },
+  tDot: { position: 'absolute' as const, bottom: '5px', width: '4px', height: '4px', borderRadius: '50%', background: 'var(--accent)' },
+  blockedX: { position: 'absolute' as const, top: '3px', right: '5px', fontSize: '10px', color: 'var(--red)', fontWeight: '700' },
+  slotsCol: { display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '480px' },
+  slotCard: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderRadius: 'var(--radius-sm)', border: '1px solid', cursor: 'pointer' },
+  slotLibre: { background: 'var(--green-light)', borderColor: 'rgba(34,197,94,0.25)', color: 'var(--text)' },
+  slotSelected: { background: 'var(--accent-light)', borderColor: 'var(--accent)', color: 'var(--text)' },
+  slotOcupado: { background: 'var(--surface2)', borderColor: 'var(--border)', color: 'var(--text3)', cursor: 'not-allowed' as const },
+  slotTime: { display: 'flex', alignItems: 'center', gap: '8px' },
+  slotHora: { fontFamily: 'var(--mono)', fontWeight: '700', fontSize: '18px' },
+  slotHoraFin: { fontFamily: 'var(--mono)', fontWeight: '600', fontSize: '16px' },
+  slotDur: { background: 'rgba(0,0,0,0.08)', borderRadius: '12px', padding: '2px 8px', fontSize: '12px', fontWeight: '600' },
+  slotStatus: { fontSize: '13px', fontWeight: '500' },
   prompt: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '300px', gap: '12px' },
   backBtn: { background: 'none', color: 'var(--text2)', fontSize: '14px', marginBottom: '24px', padding: '0', border: 'none', cursor: 'pointer' },
   cCard: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '16px', padding: '32px' },
@@ -349,6 +339,5 @@ const s: Record<string, CSSProperties> = {
   toggleRow: { display: 'flex', gap: '8px' },
   toggleBtn: { flex: 1, padding: '10px', borderRadius: 'var(--radius-sm)', background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text2)', fontWeight: '600', fontSize: '13px', cursor: 'pointer' },
   toggleBtnActive: { background: 'var(--accent-light)', borderColor: 'var(--accent)', color: 'var(--accent)' },
-  tiempoHint: { background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', fontSize: '13px', color: 'var(--text2)', lineHeight: '1.5' },
   cBtn: { background: 'var(--accent)', color: 'white', fontWeight: '600', fontSize: '15px', padding: '14px', borderRadius: 'var(--radius-sm)', width: '100%', border: 'none', cursor: 'pointer' },
 }
