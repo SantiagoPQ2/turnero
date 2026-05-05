@@ -1,43 +1,52 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { supabase } from './lib/supabase'
 import Login from './pages/Login'
 import ClienteDashboard from './pages/ClienteDashboard'
 import TurneroDashboard from './pages/TurneroDashboard'
-import { Session } from './types'
+import { Perfil } from './types'
 
 export default function App() {
-  const [session, setSession] = useState<Session | null>(() => {
-    const saved = localStorage.getItem('turnero_session')
-    return saved ? JSON.parse(saved) : null
-  })
+  const [perfil, setPerfil] = useState<Perfil | null>(null)
+  const [loading, setLoading] = useState(true)
 
-  const login = (userData: Session) => {
-    localStorage.setItem('turnero_session', JSON.stringify(userData))
-    setSession(userData)
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) loadPerfil(session.user.id)
+      else setLoading(false)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (session) loadPerfil(session.user.id)
+      else { setPerfil(null); setLoading(false) }
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const loadPerfil = async (userId: string) => {
+    const { data } = await supabase.from('z_perfiles').select('*').eq('id', userId).single()
+    setPerfil(data as Perfil | null)
+    setLoading(false)
   }
 
-  const logout = () => {
-    localStorage.removeItem('turnero_session')
-    setSession(null)
-  }
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', color: 'var(--text2)', fontSize: '15px' }}>
+      Cargando...
+    </div>
+  )
 
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={
-          session
-            ? <Navigate to={session.role === 'turnero' ? '/turnero' : '/cliente'} />
-            : <Login onLogin={login} />
+          !perfil ? <Login /> :
+          perfil.rol === 'operador' ? <Navigate to="/operador" /> :
+          <Navigate to="/proveedor" />
         } />
-        <Route path="/cliente" element={
-          session?.role === 'cliente'
-            ? <ClienteDashboard session={session} onLogout={logout} />
-            : <Navigate to="/" />
+        <Route path="/proveedor" element={
+          perfil?.rol === 'proveedor' ? <ClienteDashboard perfil={perfil} /> : <Navigate to="/" />
         } />
-        <Route path="/turnero" element={
-          session?.role === 'turnero'
-            ? <TurneroDashboard session={session} onLogout={logout} />
-            : <Navigate to="/" />
+        <Route path="/operador" element={
+          perfil?.rol === 'operador' ? <TurneroDashboard perfil={perfil} /> : <Navigate to="/" />
         } />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
