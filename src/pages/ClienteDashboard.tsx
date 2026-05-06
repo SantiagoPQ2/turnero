@@ -21,9 +21,9 @@ interface FormData {
   telefono: string
   observaciones: string
 }
-interface Props { perfil: Perfil }
+interface Props { perfil: Perfil; onLogout?: () => void }
 
-export default function ClienteDashboard({ perfil }: Props) {
+export default function ClienteDashboard({ perfil, onLogout }: Props) {
   const [days] = useState<Date[]>(generateDays)
   const [selectedDay, setSelectedDay] = useState<Date | null>(null)
   const [selectedSlot, setSelectedSlot] = useState<typeof SLOTS_FRIO[0] | null>(null)
@@ -98,7 +98,7 @@ export default function ClienteDashboard({ perfil }: Props) {
     fetchData()
   }
 
-  const logout = () => supabase.auth.signOut()
+  const logout = () => { if (onLogout) { onLogout() } else { supabase.auth.signOut() } }
 
   const estStyle = (e: string): CSSProperties => ({
     confirmado: { background: 'var(--green-light)', color: 'var(--green)' },
