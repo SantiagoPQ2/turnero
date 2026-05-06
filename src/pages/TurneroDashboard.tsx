@@ -6,9 +6,9 @@ import { Perfil, Turno, DiaBloqueado } from '../types'
 
 type EstadoFilter = 'todos' | 'confirmado' | 'pendiente' | 'cancelado'
 type CategoriaFilter = 'todos' | 'frio' | 'seco'
-interface Props { perfil: Perfil }
+interface Props { perfil: Perfil; onLogout?: () => void }
 
-export default function TurneroDashboard({ perfil }: Props) {
+export default function TurneroDashboard({ perfil, onLogout }: Props) {
   const isView = perfil.rol === 'view'
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [turnos, setTurnos] = useState<Turno[]>([])
@@ -100,7 +100,7 @@ export default function TurneroDashboard({ perfil }: Props) {
     fetchAll()
   }
 
-  const logout = () => supabase.auth.signOut()
+  const logout = () => onLogout ? onLogout() : window.location.href = "/"
 
   // Build calendar grid
   const monthStart = startOfMonth(currentMonth)
