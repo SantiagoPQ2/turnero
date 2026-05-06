@@ -11,14 +11,27 @@ export default function App() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Chequear si hay un proveedor logueado sin Auth
+    const proveedorLocal = localStorage.getItem('proveedor_perfil')
+    if (proveedorLocal) {
+      setPerfil(JSON.parse(proveedorLocal))
+      setLoading(false)
+      return
+    }
+
+    // Chequear sesión de Supabase Auth (operador/view)
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) loadPerfil(session.user.id)
       else setLoading(false)
     })
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      const local = localStorage.getItem('proveedor_perfil')
+      if (local) return // proveedor local, ignorar
       if (session) loadPerfil(session.user.id)
       else { setPerfil(null); setLoading(false) }
     })
+
     return () => subscription.unsubscribe()
   }, [])
 
@@ -43,10 +56,14 @@ export default function App() {
           <Navigate to="/proveedor" />
         } />
         <Route path="/proveedor" element={
-          perfil?.rol === 'proveedor' ? <ClienteDashboard perfil={perfil} /> : <Navigate to="/" />
+          perfil?.rol === 'proveedor'
+            ? <ClienteDashboard perfil={perfil} onLogout={() => { localStorage.removeItem('proveedor_perfil'); setPerfil(null) }} />
+            : <Navigate to="/" />
         } />
         <Route path="/operador" element={
-          (perfil?.rol === 'operador' || perfil?.rol === 'view') ? <TurneroDashboard perfil={perfil} /> : <Navigate to="/" />
+          (perfil?.rol === 'operador' || perfil?.rol === 'view')
+            ? <TurneroDashboard perfil={perfil} />
+            : <Navigate to="/" />
         } />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
